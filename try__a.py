@@ -1,19 +1,25 @@
 import os, re
 import zipfile
 from model import Line, AutoCompleteData
+from collections import defaultdict
 import pickle
-
 from runtime import timeit
 
+from sortedcontainers import SortedList
+
+import numpy as np
+
 TOP_COUNT_CONST = 5
+# FILE_NAME = '3_files.zip'
 FILE_NAME = '2021-archive.zip'
 fast_query_dict = {}
-all_lines = []
+global_lines = []
 
 @timeit
 def main():
-    lines = []
     namefile_list = []
+    lines = []
+    word_dict = defaultdict(SortedList)
     file_id = 0
     with zipfile.ZipFile(FILE_NAME) as z:
         for file_path in z.namelist():
@@ -28,12 +34,17 @@ def main():
                                        original_text=line.decode("utf-8"),
                                        canonical_text=line_canonical_text,
                                        length=len(line_canonical_text))]
-                    line_number += 1
+                        for word in line_canonical_text.split():
+                            word_dict[word].add(len(lines) - 1)
+                        line_number += 1
                 file_id += 1
-    lines = list(sorted(lines, key=lambda l: (l.canonical_text, l.original_text)))
+
 
     with open('lines.pkl', 'wb') as pickle_file:
         pickle.dump(lines, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+    with open('words_dict.pkl', 'wb') as pickle_file:
+        pickle.dump(word_dict, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     with open('file_names.pkl', 'wb') as pickle_file:
         pickle.dump(namefile_list, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
@@ -43,23 +54,24 @@ def main():
 
 @timeit
 def query(text: str):
+
     matched_lines = []
     canonical_text = re.sub('[!@#$?,.]', '', text).lower()
-    text_len = len(canonical_text)
 
+    list_sets = []
+    for word in list(canonical_text.split()):
+        list_sets += [set(word_dict[word])]
+    matched_sentences_ids = set.intersection(*list_sets)
 
+    for line_id in matched_sentences_ids:
+        line = all_lines[line_id]
+        if canonical_text in line.canonical_text:
+            matched_lines += \
+                [AutoCompleteData(completed_sentence=line.original_text,
+                                  source_text=namefile_list[line.file_number],
+                                  offset=line.canonical_text.index(canonical_text),
+                                  score=len(text) * 2)]
 
-    with open('file_names.pkl', 'rb') as pickle_load:
-        namefile_list = pickle.load(pickle_load)
-
-    print(all_lines[-1])
-    for line in all_lines:
-        file_name = namefile_list[line.file_number]
-        if text_len <= line.length and canonical_text in line.canonical_text:
-            matched_lines += [AutoCompleteData(completed_sentence=line.original_text,
-                                               source_text=file_name,
-                                               offset=line.canonical_text.index(canonical_text),
-                                               score=len(text)*2)]
         if len(matched_lines) == TOP_COUNT_CONST:
             break
     return matched_lines
@@ -74,17 +86,20 @@ def find_match(text: str):
     return fast_query_dict[text]
 
 
-# main()
-
-
+#main()
+user_input = ''
+with open('words_dict.pkl', 'rb') as pickle_load:
+    word_dict = pickle.load(pickle_load)
+with open('file_names.pkl', 'rb') as pickle_load:
+    namefile_list = pickle.load(pickle_load)
 with open('lines.pkl', 'rb') as pickle_load:
     all_lines = pickle.load(pickle_load)
-user_input = ''
 while user_input != '#':
     user_input = input('Enter your text\n')
     count = 1
     ac_list = find_match(user_input)
     print(f"Here are {len(ac_list)} suggestions")
     for ac in ac_list:
-        print(f'{count}. {ac.completed_sentence}', end='')
+        print(f'{count}. {ac.completed_sentence.strip()}')
         count += 1
+
