@@ -7,6 +7,7 @@ class Line:
     line_number: int
     original_text: str
     canonical_text: str
+    length: int
 
 
 @dataclass
